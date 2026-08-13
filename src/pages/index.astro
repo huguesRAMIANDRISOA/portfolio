@@ -1,0 +1,57 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Hero from '../components/Hero.astro';
+import Section from '../components/Section.astro';
+import SkillList from '../components/SkillList.astro';
+import ProjectCard from '../components/ProjectCard.astro';
+import ContactForm from '../components/ContactForm.astro';
+import { PROJECTS, SITE } from '../config/site';
+---
+
+<Layout>
+  <Hero />
+
+  <Section
+    id="apropos"
+    title="À propos"
+    lead="Développeur freelance, j'accompagne des équipes et des indépendants de la conception à la mise en ligne."
+    class="border-t border-ink-100 bg-white"
+  >
+    <p class="max-w-2xl text-ink-700">
+      Je travaille surtout sur des sites et applications où la vitesse, la clarté et
+      l'accessibilité comptent autant que les fonctionnalités. J'aime les bases solides :
+      HTML sémantique, peu de JavaScript, du code qu'on peut relire six mois plus tard.
+    </p>
+
+    <div class="mt-10">
+      <SkillList />
+    </div>
+  </Section>
+
+  <Section
+    id="projets"
+    title="Projets"
+    lead="Une sélection de réalisations récentes."
+  >
+    <div class="grid gap-6 sm:grid-cols-2">
+      {PROJECTS.map((project) => <ProjectCard {...project} />)}
+    </div>
+  </Section>
+
+  <Section
+    id="contact"
+    title="Contact"
+    lead="Un projet, une question, une estimation ? Écris-moi."
+    class="border-t border-ink-100 bg-white"
+  >
+    <ContactForm />
+
+    <p class="mt-8 text-sm text-ink-700">
+      Ou par email :
+      <a
+        href={`mailto:${SITE.email}`}
+        class="text-accent-600 underline underline-offset-4">{SITE.email}</a
+      >
+    </p>
+  </Section>
+</Layout>

@@ -1,0 +1,21 @@
+# build
+dist/
+.astro/
+
+# dépendances
+node_modules/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.production
+
+# éditeurs / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json

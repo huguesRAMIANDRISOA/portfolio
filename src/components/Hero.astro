@@ -1,0 +1,51 @@
+---
+import { SITE } from '../config/site';
+---
+
+<section class="relative overflow-hidden">
+  <!-- Dégradé décoratif : CSS pur, aucun coût JS. -->
+  <div
+    aria-hidden="true"
+    class="pointer-events-none absolute inset-x-0 -top-40 h-96 bg-[radial-gradient(60%_60%_at_50%_0%,var(--color-accent-400)_0%,transparent_70%)] opacity-20"
+  >
+  </div>
+
+  <div class="relative mx-auto w-full max-w-5xl px-5 pt-24 pb-20 sm:px-8 sm:pt-32 sm:pb-28">
+    <p class="text-sm font-medium tracking-wide text-accent-600 uppercase">
+      {SITE.role}
+    </p>
+
+    <h1 class="mt-4 text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
+      {SITE.name}
+    </h1>
+
+    <p class="mt-6 max-w-2xl text-lg text-pretty text-ink-700 sm:text-xl">
+      {SITE.tagline}
+    </p>
+
+    <div class="mt-10 flex flex-wrap items-center gap-3">
+      <a
+        href="#contact"
+        class="inline-flex items-center rounded-lg bg-ink-900 px-5 py-3 text-sm font-medium text-ink-50 transition-colors hover:bg-ink-700"
+      >
+        Me contacter
+      </a>
+      <a
+        href="#projets"
+        class="inline-flex items-center rounded-lg border border-ink-300 px-5 py-3 text-sm font-medium text-ink-900 transition-colors hover:border-ink-500 hover:bg-ink-100"
+      >
+        Voir mes projets
+      </a>
+      {
+        SITE.resumeUrl && (
+          <a
+            href={SITE.resumeUrl}
+            class="inline-flex items-center px-2 py-3 text-sm font-medium text-ink-700 underline underline-offset-4 transition-colors hover:text-accent-600"
+          >
+            Télécharger mon CV (PDF)
+          </a>
+        )
+      }
+    </div>
+  </div>
+</section>

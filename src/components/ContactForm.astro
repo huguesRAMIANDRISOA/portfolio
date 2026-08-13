@@ -1,0 +1,103 @@
+---
+import { SITE } from '../config/site';
+
+const fieldClass =
+  'mt-2 w-full rounded-lg border border-ink-300 bg-white px-3.5 py-2.5 text-base text-ink-900 placeholder:text-ink-500 focus:border-accent-600';
+---
+
+<form
+  id="contact-form"
+  action={SITE.formspreeEndpoint}
+  method="POST"
+  class="max-w-xl"
+>
+  <div class="grid gap-5 sm:grid-cols-2">
+    <div>
+      <label for="name" class="text-sm font-medium">Nom</label>
+      <input
+        id="name"
+        name="name"
+        type="text"
+        autocomplete="name"
+        required
+        class={fieldClass}
+      />
+    </div>
+
+    <div>
+      <label for="email" class="text-sm font-medium">Email</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        autocomplete="email"
+        required
+        class={fieldClass}
+      />
+    </div>
+  </div>
+
+  <div class="mt-5">
+    <label for="message" class="text-sm font-medium">Message</label>
+    <textarea id="message" name="message" rows="5" required class={fieldClass}></textarea>
+  </div>
+
+  <!-- Piège à robots : Formspree ignore les envois où ce champ est rempli. -->
+  <input
+    type="text"
+    name="_gotcha"
+    tabindex="-1"
+    autocomplete="off"
+    aria-hidden="true"
+    class="hidden"
+  />
+
+  <button
+    type="submit"
+    class="mt-6 inline-flex items-center rounded-lg bg-ink-900 px-5 py-3 text-sm font-medium text-ink-50 transition-colors hover:bg-ink-700 disabled:opacity-60"
+  >
+    Envoyer le message
+  </button>
+
+  <p
+    id="form-status"
+    role="status"
+    aria-live="polite"
+    class="mt-4 text-sm text-ink-700 empty:hidden"
+  >
+  </p>
+</form>
+
+<script>
+  // Envoi en AJAX pour rester sur la page ; sans JS, le POST natif vers
+  // Formspree fonctionne toujours (dégradation gracieuse).
+  const form = document.getElementById('contact-form') as HTMLFormElement | null;
+  const status = document.getElementById('form-status');
+  const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+
+  form?.addEventListener('submit', async (event) => {
+    if (!status || !button) return;
+    event.preventDefault();
+
+    button.disabled = true;
+    status.textContent = 'Envoi en cours…';
+
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) throw new Error(String(response.status));
+
+      form.reset();
+      status.textContent = 'Message envoyé. Je reviens vers vous rapidement.';
+    } catch {
+      status.textContent =
+        "L'envoi a échoué. Écris-moi directement par email, je réponds sous 24 h.";
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
