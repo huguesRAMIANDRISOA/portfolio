@@ -35,13 +35,24 @@ const { frameCount = 240 } = Astro.props;
     let running = false;
 
     /* ---- Chargement ---- */
-    function load(i: number): Promise<void> {
+    /** Requêtes menées de front : au-delà, le réseau devient le goulot et
+        les frames proches du scroll attendent derrière des frames lointaines. */
+    const CONCURRENCY = 8;
+    const requested: boolean[] = new Array(frameCount).fill(false);
+
+    function load(i: number, priority: 'high' | 'auto' = 'auto'): Promise<void> {
+      requested[i] = true;
       return new Promise((resolve) => {
         const img = new Image();
         img.decoding = 'async';
+        img.fetchPriority = priority;
         img.onload = () => {
-          frames[i] = img;
-          resolve();
+          // Décodage avant stockage : `drawImage` ne bloque plus le thread principal.
+          const done = () => {
+            frames[i] = img;
+            resolve();
+          };
+          img.decode().then(done, done);
         };
         img.onerror = () => resolve();
         img.src = src(i);
@@ -114,22 +125,65 @@ const { frameCount = 240 } = Astro.props;
     window.addEventListener('scroll', updateTarget, { passive: true });
     window.addEventListener('resize', resize);
 
+    /* ---- Préchargement : du grossier vers le fin ----
+       Une passe 1/16 (15 images) couvre déjà toute la plage de scroll : la
+       séquence répond dès les premières secondes, puis les passes suivantes
+       comblent les trous jusqu'à l'animation complète. Charger dans l'ordre
+       0,1,2… laisserait au contraire tout le bas de page sans image. */
+    function passes(): number[][] {
+      const out: number[][] = [];
+      for (let stride = 16; stride >= 1; stride = stride >> 1) {
+        const pass: number[] = [];
+        for (let i = 0; i < frameCount; i += stride) pass.push(i);
+        out.push(pass);
+      }
+      return out;
+    }
+
+    /** Dans une passe, on sert toujours la frame la plus proche de l'écran :
+        un scroll rapide obtient ses images sans attendre le reste. */
+    function takeNearest(pending: number[]): number {
+      const c = Math.round(current);
+      let best = 0;
+      let bestDist = Infinity;
+      for (let k = 0; k < pending.length; k++) {
+        const dist = Math.abs(pending[k] - c);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = k;
+        }
+      }
+      return pending.splice(best, 1)[0];
+    }
+
+    function runPass(pass: number[]): Promise<unknown> {
+      const pending = pass.filter((i) => !requested[i]);
+      const workers = Array.from(
+        { length: Math.min(CONCURRENCY, pending.length) },
+        async () => {
+          while (pending.length) {
+            const i = takeNearest(pending);
+            await load(i);
+            // La nouvelle frame est-elle celle qu'il faut afficher maintenant ?
+            const at = Math.round(current);
+            if (frames[i] && nearestLoaded(at) === frames[i]) {
+              drawn = -1;
+              draw(at);
+            }
+          }
+        },
+      );
+      return Promise.all(workers);
+    }
+
     /* ---- Démarrage ---- */
     (async () => {
       resize();
-      await load(0);
+      await load(0, 'high');
       draw(0);
       updateTarget();
 
-      // Préchargement séquentiel, sans bloquer l'affichage.
-      for (let i = 0; i < frameCount; i++) {
-        if (frames[i]) continue;
-        await load(i);
-        if (Math.round(current) === i) {
-          drawn = -1;
-          draw(i);
-        }
-      }
+      for (const pass of passes()) await runPass(pass);
     })();
   }
 </script>
