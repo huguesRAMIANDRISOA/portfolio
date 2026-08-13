@@ -16,6 +16,25 @@
   --color-accent-400: oklch(0.74 0.14 220);
   --color-accent-500: oklch(0.63 0.16 220);
   --color-accent-600: oklch(0.53 0.16 220);
+
+  /* Rouge de marque du design (accent des titres, liens actifs, jauges). */
+  --color-brand-400: oklch(0.66 0.2 27);
+  --color-brand-500: oklch(0.58 0.22 27);
+  --color-brand-600: oklch(0.5 0.2 27);
+
+  /* Curseur du titre : clignotement franc façon terminal (pas un fondu). */
+  --animate-caret: caret 1.06s steps(1, end) infinite;
+
+  @keyframes caret {
+    0%,
+    50% {
+      opacity: 1;
+    }
+    50.01%,
+    100% {
+      opacity: 0;
+    }
+  }
 }
 
 @layer base {
@@ -40,15 +59,34 @@
   }
 
   body {
-    @apply bg-ink-50 text-ink-900 font-sans antialiased;
+    @apply bg-ink-950 text-ink-50 font-sans antialiased;
   }
 
   :where(a, button, input, textarea, summary):focus-visible {
-    @apply outline-2 outline-offset-2 outline-accent-600 rounded-sm;
+    @apply outline-2 outline-offset-2 outline-brand-500 rounded-sm;
   }
 }
 
 @layer utilities {
+  /* Efface en fondu le contenu qui glisse sous le header, sans toucher au fond :
+     le masque ne s'applique qu'à cet élément, la séquence d'images est ailleurs.
+     Le dégradé est positionné par rapport à la boîte de l'élément, qui fait toute
+     la hauteur du document ; `--fade-y` (= scrollY, mis à jour en JS) le recale
+     sur le haut de la fenêtre à chaque frame. */
+  .fade-under-header {
+    --fade-y: 0px;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent calc(var(--fade-y) + 3rem),
+      #000 calc(var(--fade-y) + 6rem)
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent calc(var(--fade-y) + 3rem),
+      #000 calc(var(--fade-y) + 6rem)
+    );
+  }
+
   /* Lien d'évitement pour la navigation clavier. */
   .skip-link {
     @apply sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50

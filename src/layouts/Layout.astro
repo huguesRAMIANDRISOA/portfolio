@@ -1,28 +1,35 @@
 ---
 import { SITE } from '../config/site';
-import Header from '../components/Header.astro';
-import Footer from '../components/Footer.astro';
+import { LANGS, UI, localePath, DEFAULT_LANG, type Lang } from '../i18n/ui';
 import '../styles/global.css';
 
 interface Props {
+  lang: Lang;
   title?: string;
   description?: string;
   /** Image Open Graph (chemin absolu depuis /public) */
   image?: string;
 }
 
-const {
-  title = `${SITE.name} — ${SITE.role}`,
-  description = SITE.description,
-  image = '/og.png',
-} = Astro.props;
+const { lang, title = SITE.name, description, image = '/og.png' } = Astro.props;
 
-const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url);
-const ogImage = new URL(image, Astro.site ?? SITE.url);
+const t = UI[lang];
+const site = Astro.site ?? SITE.url;
+
+const canonical = new URL(Astro.url.pathname, site);
+const ogImage = new URL(image, site);
+
+/* `hreflang` : indique aux moteurs que les deux pages sont le même contenu en
+   deux langues, sinon elles se concurrencent dans l'index. `x-default` désigne
+   la version servie à un visiteur dont la langue n'est ni l'une ni l'autre. */
+const alternates = (Object.keys(LANGS) as Lang[]).map((code) => ({
+  code,
+  href: new URL(localePath(code), site).href,
+}));
 ---
 
 <!doctype html>
-<html lang={SITE.locale}>
+<html lang={lang}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -30,45 +37,36 @@ const ogImage = new URL(image, Astro.site ?? SITE.url);
     <link rel="sitemap" href="/sitemap-index.xml" />
     <link rel="canonical" href={canonical} />
 
+    {alternates.map(({ code, href }) => <link rel="alternate" hreflang={code} href={href} />)}
+    <link rel="alternate" hreflang="x-default" href={new URL(localePath(DEFAULT_LANG), site).href} />
+
     <title>{title}</title>
-    <meta name="description" content={description} />
+    <meta name="description" content={description ?? t.meta.description} />
     <meta name="author" content={SITE.name} />
     <meta name="generator" content={Astro.generator} />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content={SITE.name} />
     <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
+    <meta property="og:description" content={description ?? t.meta.description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={ogImage} />
-    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:locale" content={t.meta.ogLocale} />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
-    <meta name="twitter:description" content={description} />
+    <meta name="twitter:description" content={description ?? t.meta.description} />
     <meta name="twitter:image" content={ogImage} />
-
-    <script
-      type="application/ld+json"
-      is:inline
-      set:html={JSON.stringify({
-        '@context': 'https://schema.org',
-        '@type': 'Person',
-        name: SITE.name,
-        jobTitle: SITE.role,
-        url: SITE.url,
-        email: `mailto:${SITE.email}`,
-        description: SITE.description,
-      })}
-    />
   </head>
 
   <body>
-    <a href="#main" class="skip-link">Aller au contenu principal</a>
-    <Header />
+    <a href="#main" class="skip-link">{t.meta.skip}</a>
     <main id="main">
       <slot />
     </main>
-    <Footer />
+
+    {/* Hors de `<main>` : c'est la condition pour que le `<footer>` compte
+        comme repère `contentinfo` pour les lecteurs d'écran. */}
+    <slot name="footer" />
   </body>
 </html>

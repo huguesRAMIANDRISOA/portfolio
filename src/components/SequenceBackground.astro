@@ -1,0 +1,135 @@
+---
+interface Props {
+  /** Nombre de frames de la séquence dans /public/image. */
+  frameCount?: number;
+}
+
+const { frameCount = 240 } = Astro.props;
+---
+
+{/* Séquence d'images pilotée par le scroll, fixée derrière le contenu.
+    Conservé mais non utilisé : le design est passé sur fond uni. */}
+<div class="fixed inset-0 z-0" data-frame-count={frameCount} aria-hidden="true">
+  <canvas id="sequence-canvas" class="block h-full w-full"></canvas>
+  <div class="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/85 to-ink-950/55">
+  </div>
+</div>
+
+<script>
+  const layer = document.querySelector<HTMLElement>('[data-frame-count]');
+  const canvasEl = document.getElementById('sequence-canvas');
+
+  if (layer && canvasEl instanceof HTMLCanvasElement) {
+    const canvas = canvasEl;
+    const ctx = canvas.getContext('2d', { alpha: false })!;
+    const frameCount = Number(layer.dataset.frameCount ?? 0);
+    const src = (i: number) =>
+      `/image/ezgif-frame-${String(i + 1).padStart(3, '0')}.jpg`;
+
+    const frames: (HTMLImageElement | undefined)[] = new Array(frameCount);
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let target = 0; // frame visé par le scroll
+    let current = 0; // frame réellement affiché (lissé)
+    let drawn = -1;
+    let running = false;
+
+    /* ---- Chargement ---- */
+    function load(i: number): Promise<void> {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.decoding = 'async';
+        img.onload = () => {
+          frames[i] = img;
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = src(i);
+      });
+    }
+
+    /** Frame chargée la plus proche : évite tout trou visuel pendant le préchargement. */
+    function nearestLoaded(i: number): HTMLImageElement | undefined {
+      if (frames[i]) return frames[i];
+      for (let d = 1; d < frameCount; d++) {
+        if (frames[i - d]) return frames[i - d];
+        if (frames[i + d]) return frames[i + d];
+      }
+      return undefined;
+    }
+
+    /* ---- Rendu ---- */
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const { width, height } = canvas.getBoundingClientRect();
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      drawn = -1;
+      draw(Math.round(current));
+      updateTarget();
+    }
+
+    function draw(index: number) {
+      const img = nearestLoaded(index);
+      if (!img) return;
+      if (index === drawn) return;
+      drawn = index;
+
+      const cw = canvas.width;
+      const ch = canvas.height;
+      // cover : on remplit le cadre sans déformer l'image
+      const scale = Math.max(cw / img.naturalWidth, ch / img.naturalHeight);
+      const w = img.naturalWidth * scale;
+      const h = img.naturalHeight * scale;
+      ctx.drawImage(img, (cw - w) / 2, (ch - h) / 2, w, h);
+    }
+
+    /* ---- Scroll : la séquence est répartie sur toute la hauteur de la page ---- */
+    function updateTarget() {
+      const doc = document.documentElement;
+      const distance = doc.scrollHeight - window.innerHeight;
+      const progress = distance > 0 ? window.scrollY / distance : 0;
+      const clamped = Math.min(1, Math.max(0, progress));
+      target = clamped * (frameCount - 1);
+      if (!running) {
+        running = true;
+        requestAnimationFrame(tick);
+      }
+    }
+
+    /* Interpolation exponentielle : absorbe les à-coups de la molette
+       et donne un défilement d'images fluide même en scroll saccadé. */
+    function tick() {
+      const delta = target - current;
+      if (reduceMotion || Math.abs(delta) < 0.01) {
+        current = target;
+        running = false;
+      } else {
+        current += delta * 0.15;
+        requestAnimationFrame(tick);
+      }
+      draw(Math.round(current));
+    }
+
+    window.addEventListener('scroll', updateTarget, { passive: true });
+    window.addEventListener('resize', resize);
+
+    /* ---- Démarrage ---- */
+    (async () => {
+      resize();
+      await load(0);
+      draw(0);
+      updateTarget();
+
+      // Préchargement séquentiel, sans bloquer l'affichage.
+      for (let i = 0; i < frameCount; i++) {
+        if (frames[i]) continue;
+        await load(i);
+        if (Math.round(current) === i) {
+          drawn = -1;
+          draw(i);
+        }
+      }
+    })();
+  }
+</script>

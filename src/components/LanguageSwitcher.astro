@@ -1,0 +1,82 @@
+---
+/**
+ * Sélecteur de langue du header.
+ *
+ * Bâti sur `<details>` : l'ouverture, la fermeture et le clavier sont pris en
+ * charge par le navigateur. Le script ne sert qu'à fermer le menu au clic
+ * extérieur et à la touche Échap, deux comportements que `<details>` n'a pas.
+ */
+import Flag from './Flag.astro';
+import { LANGS, localePath, type Lang } from '../i18n/ui';
+
+interface Props {
+  lang: Lang;
+  label: string;
+}
+
+const { lang, label } = Astro.props;
+const codes = Object.keys(LANGS) as Lang[];
+---
+
+<details class="relative" data-lang-switcher>
+  <summary
+    class="flex cursor-pointer list-none items-center gap-2 rounded-md border border-ink-700/60 px-2.5 py-1.5 text-xs font-bold transition-colors hover:border-brand-500 [&::-webkit-details-marker]:hidden"
+    aria-label={label}
+  >
+    <Flag lang={lang} class="h-3 w-4.5 rounded-[2px]" />
+    {LANGS[lang].short}
+
+    <svg
+      viewBox="0 0 24 24"
+      class="h-3 w-3 text-ink-300"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  </summary>
+
+  {/* `bg-ink-950/95` : le menu passe par-dessus la séquence d'images, il lui
+      faut un fond opaque pour rester lisible. */}
+  <ul
+    class="absolute right-0 z-50 mt-2 w-40 overflow-hidden rounded-md border border-ink-700/60 bg-ink-950/95 py-1 backdrop-blur"
+  >
+    {
+      codes.map((code) => (
+        <li>
+          <a
+            href={localePath(code)}
+            hreflang={code}
+            lang={code}
+            aria-current={code === lang ? 'true' : undefined}
+            class="flex items-center gap-3 px-3 py-2 text-xs transition-colors hover:bg-ink-900 aria-[current=true]:font-bold aria-[current=true]:text-brand-500"
+          >
+            <Flag lang={code} class="h-3 w-4.5 shrink-0 rounded-[2px]" />
+            {LANGS[code].name}
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</details>
+
+<script>
+  {
+    const menu = document.querySelector<HTMLDetailsElement>('[data-lang-switcher]');
+
+    if (menu) {
+      // Un clic dans le menu lui-même ne doit pas le refermer avant la navigation.
+      document.addEventListener('click', (event) => {
+        if (!menu.contains(event.target as Node)) menu.open = false;
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') menu.open = false;
+      });
+    }
+  }
+</script>

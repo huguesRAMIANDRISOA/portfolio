@@ -1,0 +1,39 @@
+---
+/**
+ * Drapeau d'une langue, en SVG inline.
+ *
+ * Pas d'emoji (🇫🇷) : Windows ne les rend pas et affiche les deux lettres du
+ * code pays à la place. Pas d'image non plus — ces tracés pèsent moins qu'une
+ * requête HTTP.
+ */
+import type { Lang } from '../i18n/ui';
+
+interface Props {
+  lang: Lang;
+  class?: string;
+}
+
+const { lang, class: className } = Astro.props;
+---
+
+{
+  lang === 'fr' ? (
+    <svg viewBox="0 0 60 30" class={className} aria-hidden="true">
+      <rect width="20" height="30" fill="#002654" />
+      <rect x="20" width="20" height="30" fill="#ffffff" />
+      <rect x="40" width="20" height="30" fill="#ED2939" />
+    </svg>
+  ) : (
+    /* Union Jack simplifié : les diagonales rouges sont centrées sur les
+       blanches au lieu d'être décalées. Le détail est invisible à 20 px de
+       large et évite un `clipPath`, dont l'`id` entrerait en conflit avec
+       lui-même si le drapeau est rendu deux fois sur la page. */
+    <svg viewBox="0 0 60 30" class={className} aria-hidden="true">
+      <rect width="60" height="30" fill="#012169" />
+      <path d="M0,0 L60,30 M60,0 L0,30" stroke="#ffffff" stroke-width="6" />
+      <path d="M0,0 L60,30 M60,0 L0,30" stroke="#C8102E" stroke-width="2" />
+      <path d="M30,0 V30 M0,15 H60" stroke="#ffffff" stroke-width="10" />
+      <path d="M30,0 V30 M0,15 H60" stroke="#C8102E" stroke-width="6" />
+    </svg>
+  )
+}
