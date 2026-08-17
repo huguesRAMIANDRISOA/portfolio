@@ -1,189 +1,198 @@
 ---
-interface Props {
-  /** Nombre de frames de la séquence dans /public/image. */
-  frameCount?: number;
-}
+/* Séquence d'images pilotée par le scroll, fixée derrière le contenu.
+   Les 120 frames sont empaquetées dans 6 atlas WebP générés hors-ligne par
+   `scripts/build-atlas.sh` (6 requêtes / 1,48 Mo, contre 240 / 8,8 Mo avant).
 
-const { frameCount = 240 } = Astro.props;
+   Imports statiques explicites : Vite émet les fichiers dans `_astro/` avec un
+   hash de contenu, ce qui rend le `Cache-Control: immutable` de vercel.json sûr.
+   Pas de `getImage()` — la conversion WebP est déjà faite par ffmpeg, une
+   seconde passe sharp au build ne ferait que dégrader et rallonger. */
+import atlas0 from '../assets/atlas-0.webp';
+import atlas1 from '../assets/atlas-1.webp';
+import atlas2 from '../assets/atlas-2.webp';
+import atlas3 from '../assets/atlas-3.webp';
+import atlas4 from '../assets/atlas-4.webp';
+import atlas5 from '../assets/atlas-5.webp';
+
+const ATLAS_URLS = [atlas0, atlas1, atlas2, atlas3, atlas4, atlas5].map((a) => a.src);
+
+/* Doivent rester synchronisés avec `scripts/build-atlas.sh`.
+   FRAME_W / FRAME_H décrivent UNE frame dans l'atlas, pas l'atlas (3584 × 2520). */
+const FRAME_COUNT = 120;
+const PER_ATLAS = 20;
+const ATLAS_COLS = 4;
+const FRAME_W = 896;
+const FRAME_H = 504;
 ---
 
-{/* Séquence d'images pilotée par le scroll, fixée derrière le contenu.
-    Conservé mais non utilisé : le design est passé sur fond uni. */}
-<div class="fixed inset-0 z-0" data-frame-count={frameCount} aria-hidden="true">
+<div
+  id="track"
+  class="fixed inset-0 z-0"
+  aria-hidden="true"
+  data-atlases={JSON.stringify(ATLAS_URLS)}
+  data-frame-count={FRAME_COUNT}
+  data-per-atlas={PER_ATLAS}
+  data-atlas-cols={ATLAS_COLS}
+  data-frame-w={FRAME_W}
+  data-frame-h={FRAME_H}
+>
   <canvas id="sequence-canvas" class="block h-full w-full"></canvas>
   <div class="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/85 to-ink-950/55">
   </div>
 </div>
 
 <script>
-  const layer = document.querySelector<HTMLElement>('[data-frame-count]');
+  /* ---- Budget mémoire ----------------------------------------------------
+     120 frames × 896 × 504 × 4 octets ≈ 217 Mo de bitmaps décodés une fois les
+     6 atlas chargés. Ce chiffre dépend UNIQUEMENT du nombre total de pixels :
+     redécouper la grille (2×10, 5×4, 12 atlas de 10 frames…) ne change rien.
+     Les seuls vrais leviers sont FRAME_W/FRAME_H et FRAME_COUNT, et ils vivent
+     dans `scripts/build-atlas.sh` — le composant ne fait que les relire.
+     C'est aussi pourquoi les atlas sont chargés en séquence et non en parallèle :
+     ça étale le pic d'allocation au lieu de le concentrer au premier rendu. */
+
+  const track = document.getElementById('track');
   const canvasEl = document.getElementById('sequence-canvas');
 
-  if (layer && canvasEl instanceof HTMLCanvasElement) {
+  if (track && canvasEl instanceof HTMLCanvasElement) {
     const canvas = canvasEl;
     const ctx = canvas.getContext('2d', { alpha: false })!;
-    const frameCount = Number(layer.dataset.frameCount ?? 0);
-    const src = (i: number) =>
-      `/image/ezgif-frame-${String(i + 1).padStart(3, '0')}.jpg`;
 
-    const frames: (HTMLImageElement | undefined)[] = new Array(frameCount);
+    const ATLAS_URLS: string[] = JSON.parse(track.dataset.atlases ?? '[]');
+    const FRAME_COUNT = Number(track.dataset.frameCount);
+    const PER_ATLAS = Number(track.dataset.perAtlas);
+    const ATLAS_COLS = Number(track.dataset.atlasCols);
+    const FRAME_W = Number(track.dataset.frameW);
+    const FRAME_H = Number(track.dataset.frameH);
+
+    /** Lissage du playhead : 0 = figé, 1 = collé au scroll. */
+    const EASE = 0.12;
+
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const atlases: (HTMLImageElement | undefined)[] = new Array(ATLAS_URLS.length);
 
-    let target = 0; // frame visé par le scroll
-    let current = 0; // frame réellement affiché (lissé)
-    let drawn = -1;
+    let target = 0; // frame visée par le scroll
+    let current = 0; // frame réellement affichée (lissée)
+    let lastDrawn = -1; // -1 force le prochain draw (redimensionnement, nouvel atlas)
     let running = false;
-
-    /* ---- Chargement ---- */
-    /** Requêtes menées de front : au-delà, le réseau devient le goulot et
-        les frames proches du scroll attendent derrière des frames lointaines. */
-    const CONCURRENCY = 8;
-    const requested: boolean[] = new Array(frameCount).fill(false);
-
-    function load(i: number, priority: 'high' | 'auto' = 'auto'): Promise<void> {
-      requested[i] = true;
-      return new Promise((resolve) => {
-        const img = new Image();
-        img.decoding = 'async';
-        img.fetchPriority = priority;
-        img.onload = () => {
-          // Décodage avant stockage : `drawImage` ne bloque plus le thread principal.
-          const done = () => {
-            frames[i] = img;
-            resolve();
-          };
-          img.decode().then(done, done);
-        };
-        img.onerror = () => resolve();
-        img.src = src(i);
-      });
-    }
-
-    /** Frame chargée la plus proche : évite tout trou visuel pendant le préchargement. */
-    function nearestLoaded(i: number): HTMLImageElement | undefined {
-      if (frames[i]) return frames[i];
-      for (let d = 1; d < frameCount; d++) {
-        if (frames[i - d]) return frames[i - d];
-        if (frames[i + d]) return frames[i + d];
-      }
-      return undefined;
-    }
 
     /* ---- Rendu ---- */
     function resize() {
+      // DPR capé à 2 : au-delà, le coût de fill croît sans gain visible.
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const { width, height } = canvas.getBoundingClientRect();
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
-      drawn = -1;
+      lastDrawn = -1;
       draw(Math.round(current));
-      updateTarget();
+      if (!reduceMotion) updateTarget();
     }
 
     function draw(index: number) {
-      const img = nearestLoaded(index);
-      if (!img) return;
-      if (index === drawn) return;
-      drawn = index;
+      const frame = Math.min(FRAME_COUNT - 1, Math.max(0, index));
+      const atlasIndex = Math.floor(frame / PER_ATLAS);
+      const img = atlases[atlasIndex];
 
+      // Atlas pas encore décodé : on ne touche pas au canvas, la dernière frame
+      // dessinée reste affichée. Pas de trou visuel pendant le chargement.
+      if (!img) return;
+      if (frame === lastDrawn) return;
+
+      // Position de la sous-image dans la grille de l'atlas.
+      const local = frame % PER_ATLAS;
+      const sx = (local % ATLAS_COLS) * FRAME_W;
+      const sy = Math.floor(local / ATLAS_COLS) * FRAME_H;
+
+      // cover : on remplit le cadre sans déformer l'image.
       const cw = canvas.width;
       const ch = canvas.height;
-      // cover : on remplit le cadre sans déformer l'image
-      const scale = Math.max(cw / img.naturalWidth, ch / img.naturalHeight);
-      const w = img.naturalWidth * scale;
-      const h = img.naturalHeight * scale;
-      ctx.drawImage(img, (cw - w) / 2, (ch - h) / 2, w, h);
+      const scale = Math.max(cw / FRAME_W, ch / FRAME_H);
+      const w = FRAME_W * scale;
+      const h = FRAME_H * scale;
+
+      ctx.drawImage(img, sx, sy, FRAME_W, FRAME_H, (cw - w) / 2, (ch - h) / 2, w, h);
+      lastDrawn = frame;
+    }
+
+    /** Force un redessin après l'arrivée d'un atlas : la frame sous le playhead
+        est peut-être devenue affichable. */
+    function refresh() {
+      lastDrawn = -1;
+      draw(Math.round(current));
     }
 
     /* ---- Scroll : la séquence est répartie sur toute la hauteur de la page ---- */
-    function updateTarget() {
+    function scrollProgress(): number {
       const doc = document.documentElement;
       const distance = doc.scrollHeight - window.innerHeight;
-      const progress = distance > 0 ? window.scrollY / distance : 0;
-      const clamped = Math.min(1, Math.max(0, progress));
-      target = clamped * (frameCount - 1);
+      if (distance <= 0) return 0;
+      return Math.min(1, Math.max(0, window.scrollY / distance));
+    }
+
+    function updateTarget() {
+      target = scrollProgress() * (FRAME_COUNT - 1);
       if (!running) {
         running = true;
         requestAnimationFrame(tick);
       }
     }
 
-    /* Interpolation exponentielle : absorbe les à-coups de la molette
-       et donne un défilement d'images fluide même en scroll saccadé. */
+    /* Interpolation exponentielle : absorbe les à-coups de la molette et donne
+       un défilement fluide même en scroll saccadé. La boucle s'arrête dès que
+       le playhead est stabilisé, pour ne pas tourner en permanence. */
     function tick() {
       const delta = target - current;
-      if (reduceMotion || Math.abs(delta) < 0.01) {
+      if (Math.abs(delta) < 0.01) {
         current = target;
         running = false;
       } else {
-        current += delta * 0.15;
+        current += delta * EASE;
         requestAnimationFrame(tick);
       }
       draw(Math.round(current));
     }
 
-    window.addEventListener('scroll', updateTarget, { passive: true });
-    window.addEventListener('resize', resize);
-
-    /* ---- Préchargement : du grossier vers le fin ----
-       Une passe 1/16 (15 images) couvre déjà toute la plage de scroll : la
-       séquence répond dès les premières secondes, puis les passes suivantes
-       comblent les trous jusqu'à l'animation complète. Charger dans l'ordre
-       0,1,2… laisserait au contraire tout le bas de page sans image. */
-    function passes(): number[][] {
-      const out: number[][] = [];
-      for (let stride = 16; stride >= 1; stride = stride >> 1) {
-        const pass: number[] = [];
-        for (let i = 0; i < frameCount; i += stride) pass.push(i);
-        out.push(pass);
-      }
-      return out;
-    }
-
-    /** Dans une passe, on sert toujours la frame la plus proche de l'écran :
-        un scroll rapide obtient ses images sans attendre le reste. */
-    function takeNearest(pending: number[]): number {
-      const c = Math.round(current);
-      let best = 0;
-      let bestDist = Infinity;
-      for (let k = 0; k < pending.length; k++) {
-        const dist = Math.abs(pending[k] - c);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = k;
-        }
-      }
-      return pending.splice(best, 1)[0];
-    }
-
-    function runPass(pass: number[]): Promise<unknown> {
-      const pending = pass.filter((i) => !requested[i]);
-      const workers = Array.from(
-        { length: Math.min(CONCURRENCY, pending.length) },
-        async () => {
-          while (pending.length) {
-            const i = takeNearest(pending);
-            await load(i);
-            // La nouvelle frame est-elle celle qu'il faut afficher maintenant ?
-            const at = Math.round(current);
-            if (frames[i] && nearestLoaded(at) === frames[i]) {
-              drawn = -1;
-              draw(at);
-            }
-          }
-        },
-      );
-      return Promise.all(workers);
+    /* ---- Chargement : atlas-0 d'abord, les autres en séquence ---- */
+    function loadAtlas(i: number): Promise<void> {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.decoding = 'async';
+        if (i === 0) img.fetchPriority = 'high';
+        img.onload = () => {
+          // Décodage avant stockage : `drawImage` ne bloque plus le thread principal.
+          const done = () => {
+            atlases[i] = img;
+            resolve();
+          };
+          img.decode().then(done, done);
+        };
+        img.onerror = () => resolve();
+        img.src = ATLAS_URLS[i];
+      });
     }
 
     /* ---- Démarrage ---- */
+    window.addEventListener('resize', resize);
+
     (async () => {
       resize();
-      await load(0, 'high');
-      draw(0);
+
+      // La frame 0 s'affiche dès qu'atlas-0 est prêt, sans attendre le reste.
+      await loadAtlas(0);
+      refresh();
+
+      // Mouvement réduit : image fixe. Ni listener de scroll, ni boucle rAF, et
+      // les 5 autres atlas ne sont jamais téléchargés (1,2 Mo et ~180 Mo économisés).
+      if (reduceMotion) return;
+
+      window.addEventListener('scroll', updateTarget, { passive: true });
       updateTarget();
 
-      for (const pass of passes()) await runPass(pass);
+      // En séquence, pas en parallèle : lisse le pic mémoire au chargement.
+      for (let i = 1; i < ATLAS_URLS.length; i++) {
+        await loadAtlas(i);
+        refresh();
+      }
     })();
   }
 </script>
